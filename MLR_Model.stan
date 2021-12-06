@@ -1,14 +1,33 @@
-data {
-  int<lower=0> N;   // number of data items
-  int<lower=0> K;   // number of predictors
-  matrix[N, K] x;   // predictor matrix
-  vector[N] y;      // outcome vector
+data {                      // Data block
+  int<lower=1> N;           // Sample size
+  int<lower=1> K;           // Dimension of model matrix
+  matrix[N, K] X;           // Model Matrix
+  vector[N] y;              // Target variable
 }
-parameters {
-  real alpha;           // intercept
-  vector[K] beta;       // coefficients for predictors
-  real<lower=0> sigma;  // error scale
+
+/* 
+transformed data {          // Transformed data block. Not used presently.
+} 
+*/
+
+parameters {                // Parameters block
+  vector[K] beta;           // Coefficient vector
+  real<lower=0> sigma;      // Error scale
 }
-model {
-  y ~ normal(x * beta + alpha, sigma);  // likelihood
+
+model {                     // Model block
+  vector[N] mu;
+  mu = X * beta;            // Creation of linear predictor
+  
+  // priors
+  beta ~ normal(0, 10);
+  sigma ~ cauchy(0, 5);     // With sigma bounded at 0, this is half-cauchy
+  
+  // likelihood
+  y ~ normal(mu, sigma);
 }
+
+/*
+generated quantities {      // Generated quantities block. Not used presently.
+}
+*/

@@ -19,7 +19,7 @@ small <- small[1:25, ]
 model <- lm(FIP ~.-Name-year-p_formatted_ip, data = small)
 
 N <- nrow(small)
-X <- model.matrix(FIP ~.-1-Name-year-p_formatted_ip, data = small)
+X <- model.matrix(FIP ~.-1-Name-year-p_formatted_ip, data = small) %>% scale()
 K <- ncol(X)
 y <- small$FIP
 data <- list(N = N, K = K, x = X, y = y)   # Set alpha and beta without needing to recompile!
