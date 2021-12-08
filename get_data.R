@@ -23,19 +23,11 @@ small <- combined %>% select(-X, -player_id, -xba, -xslg, -xwoba, -xobp, -xiso, 
 X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% scale()
 y <- small$FIP
 
-library(glmnet)
-cv.out <- cv.glmnet(X,y,alpha=0, standardize = TRUE)
-plot(cv.out)
-bestlam <- cv.out$lambda.min
-bestlam
-mod <- glmnet(X, y , alpha = 0, lambda = bestlam, standardize = TRUE)
-predict(mod,type="coefficients",s=bestlam)
-
 N <- nrow(small)
 X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% scale() %>% bind_cols(intercept = 1)
 K <- ncol(X)
 y <- small$FIP
-data <- list(N = N, K = K, X = X, y = y, a = 30, b = 15)   # Set alpha and beta without needing to recompile!
+data <- list(N = N, K = K, X = X, y = y, a = 45, b = 15)   # Set alpha and beta without needing to recompile!
 
 library(rstan)
 ### Run the model and examine results
@@ -69,7 +61,7 @@ library(shinystan)
 launch_shinystan(fit2)
 
 
-data <- list(N = N, K = K, X = X, y = y, a = .1, b = 10)   # Set alpha and beta without needing to recompile!
+data <- list(N = N, K = K, X = X, y = y, a = 75, b = 20)   # Set alpha and beta without needing to recompile!
 
 library(rstan)
 ### Run the model and examine results
@@ -84,3 +76,31 @@ fit3 <- stan(model_code = readLines("MLR_Model.stan"),
 samples3 <- rstan::extract(fit3)
 library(shinystan)
 launch_shinystan(fit3)
+
+
+library(glmnet)
+cv.out <- cv.glmnet(X,y,alpha=0, standardize = TRUE)
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+bestlam
+mod <- glmnet(X, y , alpha = 0, lambda = bestlam, standardize = TRUE)
+predict(mod,type="coefficients",s=bestlam)
+
+bootstrap_coef <- matrix(0, nrow = 100, ncol = 50)
+for(i in 1:100){
+    n <- nrow(small)
+    obs <- sample(1:n, n, replace = TRUE)
+    boot_sample <- small[obs, ]
+    x <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = boot_sample)
+    y <- boot_sample$FIP
+    model <- glmnet(x, y, alpha = 0, lambda = bestlam)
+    coef <- as.vector(predict(model,type="coefficients",s=bestlam))
+    bootstrap_coef[i, ] <- coef
+}
+cis <- apply(bootstrap_coef, 2, quantile, c(.025, .975))
+cis
+boot_est <- apply(bootstrap_coef, 2, mean)
+vars <- rownames(predict(model,type="coefficients",s=bestlam))
+ridge_freq <- data.frame(Variable = vars, Lower = cis[1, ], 
+                         Estimate = boot_est, Upper = cis[2,]) %>% 
+    arrange(desc(Estimate))

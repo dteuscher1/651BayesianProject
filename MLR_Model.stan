@@ -15,18 +15,19 @@ transformed data {          // Transformed data block. Not used presently.
 parameters {                // Parameters block
   vector[K] beta;           // Coefficient vector
   real<lower=0> sigma;
-  real<lower=0> sigma_beta; // Error scale
+  real<lower=0> sigma_beta;
+  real<lower=0> alpha;// Error scale
 }
 
 model {                     // Model block
   vector[N] mu;
-  mu = X * beta;            // Creation of linear predictor
+  mu = alpha + X * beta;            // Creation of linear predictor
   
   // priors
-  
+  alpha ~ normal(0, 10);
   sigma_beta ~ gamma(a, b);
   beta ~ normal(0, sigma_beta);
-  sigma ~ uniform(0, 10);     // With sigma bounded at 0, this is half-cauchy
+  sigma ~ inv_gamma(1, 20);     // With sigma bounded at 0, this is half-cauchy
   
   // likelihood
   y ~ normal(mu, sigma);
