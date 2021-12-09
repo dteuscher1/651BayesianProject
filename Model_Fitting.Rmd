@@ -1,4 +1,13 @@
+---
+output: pdf_document
+---
+
+```{r, eval=FALSE}
+# Load packages
 library(baseballr)
+# Alternatively, using the devtools package:
+#devtools::install_github(repo = "BillPetti/baseballr")
+
 library(tidyverse)
 library(mvtnorm)
 library(rstan)
@@ -7,35 +16,49 @@ library(latex2exp)
 library(glmnet)
 library(patchwork)
 
-# Alternatively, using the devtools package:
-#devtools::install_github(repo = "BillPetti/baseballr")
-
+# Load in FIP data from Fangraphs; I didn't end up using 2017, but I have the 
+# data anyway
 data_2016 <- fg_pitch_leaders(2016, 2016, qual = 40, ind = 0)
 data_2017 <- fg_pitch_leaders(2017, 2017, qual = 40, ind = 0)
+
+# Combine the data frames together with FIP
 data <- data_2016 %>% 
     bind_rows(data_2017) %>% 
     mutate(Season = as.numeric(Season))
-savant <- read.csv("Data/stats.csv") %>% 
-    mutate(Name = str_trim(paste(first_name, last_name)))
-combined <- savant %>% inner_join(data %>% select(Name, FIP, Season), by = c("Name", "year" = "Season"))
 
-small <- combined %>% select(-X, -player_id, -xba, -xslg, -xwoba, -xobp, -xiso, -wobacon, 
-                             -exit_velocity_avg, -barrel_batted_rate, -hard_hit_percent) %>%
+# Read in statcast variables with covariates for modeling
+savant <- read.csv("Data/stats.csv") %>% 
+    # Combine first and last name together
+    mutate(Name = str_trim(paste(first_name, last_name))) 
+
+# Join the two datasets together
+combined <- savant %>% inner_join(data %>% select(Name, FIP, Season), 
+                                  by = c("Name", "year" = "Season"))
+
+# Filter the data to included right handed pitchers who pitched more than 90 
+# innings in 2016
+small <- combined %>% select(-X, -player_id, -xba, -xslg, -xwoba, -xobp, -xiso,
+                             -wobacon, -exit_velocity_avg, -barrel_batted_rate,
+                             -hard_hit_percent) %>%
     filter(year == 2016) %>% 
     filter(p_formatted_ip > 90) %>%
     filter(pitch_hand == "R") %>%
     select(-p_formatted_ip, -pitch_hand) %>%
+    # Replace a few NA observations with 0; Some pitchers didn't throw
+    # breaking or offspeed pitches, so it makes sense to input 0 for those
+    # variables
     replace(is.na(.), 0) 
 
+# Create data to use for Stan
 N <- nrow(small)
-X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% scale()
+# Standardize the covariates
+X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% 
+    scale()
 K <- ncol(X)
 y <- small$FIP
-data <- list(N = N, K = K, X = X, y = y, a = 36, b = 12)   # Set alpha and beta without needing to recompile!
 
 
 # Hand draws 
-
 ndraws <- 10000
 beta.draws <- matrix(0, nrow = ndraws, ncol = ncol(X))
 alpha.draws <- numeric(length = ndraws)
@@ -49,20 +72,32 @@ b <- 8
 X_mat <- as.matrix(X)
 accept <- 0
 for(i in 2:ndraws){
+    # Subtract alpha so r ~ N(Xbeta, sigma^2)
     r <- y - alpha.draws[i-1]
-    sigma_mat <- solve((t(X_mat) %*% X_mat)/sigma2[i-1] + 1/sigma2_beta[i-1] *diag(49))
+    sigma_mat <- solve((t(X_mat) %*% X_mat)/sigma2[i-1] +
+                           1/sigma2_beta[i-1] *diag(49))
     mu_vec <- sigma_mat %*% ((t(X) %*% r)/sigma2[i-1])
     
+    # Draw from full conditional for beta
     beta.draws[i, ] <- rmvnorm(1, mean = mu_vec, sigma = sigma_mat)
     a_star <- 2 + (nrow(X_mat)/2)
     b_star <- 10 + .5*sum((r - (X_mat %*% beta.draws[i, ]))^2)
+    
+    # Draw from full conditional for sigma
     sigma2[i] <- 1/rgamma(1, a_star, b_star)
+    
+    # Subtract Xbeta so r ~ N(alpha, sigma^2)
     r <- y - (X_mat %*% beta.draws[i, ])
     alpha_mat <- matrix(1, ncol = 1, nrow = nrow(X))
-    sigma_mat <- solve((t(alpha_mat) %*% alpha_mat)/sigma2[i] + 1/sigma2_beta[i-1] *diag(1))
+    sigma_mat <- solve((t(alpha_mat) %*% alpha_mat)/sigma2[i] + 
+                           1/sigma2_beta[i-1] *diag(1))
     mu_vec <- sigma_mat %*% ((t(alpha_mat) %*% r)/sigma2[i])
+    # Draw from full conditional for beta
     alpha.draws[i] <- rmvnorm(1, mean = mu_vec, sigma = sigma_mat)
+    
+    # Propose value for sigma^2 beta
     proposed_value <- rnorm(1, mean = sigma2_beta[i-1], sd = .4)
+    # Metropolis Hastings for sigma^2 beta using Gaussian random walk
     if(proposed_value > 0){
         mh <- sum(dnorm(beta.draws[i, ], 0, proposed_value, log = T)) + 
             sum(dgamma(proposed_value, a, b, log = T)) - 
@@ -79,19 +114,42 @@ for(i in 2:ndraws){
     }    
 }
 
+# Trace plots for parameters
 plot(sigma2_beta, type = "l")
 plot(alpha.draws, type = "l")
 plot(beta.draws[,1], type = "l")
 plot(sigma2, type = "l")
+
+# Effective Sample Size for hand draws
 coda::effectiveSize(sigma2_beta)
 coda::effectiveSize(alpha.draws)
 coda::effectiveSize(sigma2)
 coda::effectiveSize(beta.draws)
 
+
+# Fit first Stan model
+data <- list(N = N, K = K, X = X, y = y, a = 40, b = 8) 
+
 ### Run the model and examine results
 nCores <- parallel::detectCores()
 options(mc.cores = nCores)          # Use all available cores
 rstan_options(auto_write = TRUE)    # Cache compiled code.
+
+# Fit model
+fit3 <- stan(model_code = readLines("MLR_Model.stan"),
+            data = data, iter = 10000, warmup = 1000, thin = 2, chains = 2)
+
+# Extract samples
+samples3 <- rstan::extract(fit3)
+
+# Explore results and diagnostics using Shinystan; This just requires putting
+# the fitted model into this function and then you can explore the results
+# With so many parameters, it was easier to look at things using this
+launch_shinystan(fit3)
+
+# Sensitivity analysis
+## Fit model 2
+data <- list(N = N, K = K, X = X, y = y, a = 36, b = 12) 
 
 fit <- stan(model_code = readLines("MLR_Model.stan"),
             data = data, iter = 10000, warmup = 1000, thin = 2, chains = 2)
@@ -100,13 +158,8 @@ fit <- stan(model_code = readLines("MLR_Model.stan"),
 samples <- rstan::extract(fit)
 launch_shinystan(fit)
 
-
-data <- list(N = N, K = K, X = X, y = y, a = 1, b = 1)   # Set alpha and beta without needing to recompile!
-
-### Run the model and examine results
-nCores <- parallel::detectCores()
-options(mc.cores = nCores)          # Use all available cores
-rstan_options(auto_write = TRUE)    # Cache compiled code.
+## Fit model 3
+data <- list(N = N, K = K, X = X, y = y, a = 1, b = 1) 
 
 fit2 <- stan(model_code = readLines("MLR_Model.stan"),
             data = data, iter = 10000, warmup = 1000, thin = 2, chains = 2)
@@ -115,32 +168,17 @@ fit2 <- stan(model_code = readLines("MLR_Model.stan"),
 samples2 <- rstan::extract(fit2)
 launch_shinystan(fit2)
 
-
-data <- list(N = N, K = K, X = X, y = y, a = 40, b = 8)   # Set alpha and beta without needing to recompile!
-
-### Run the model and examine results
-nCores <- parallel::detectCores()
-options(mc.cores = nCores)          # Use all available cores
-rstan_options(auto_write = TRUE)    # Cache compiled code.
-
-fit3 <- stan(model_code = readLines("MLR_Model.stan"),
-            data = data, iter = 10000, warmup = 1000, thin = 2, chains = 2)
-
-
-samples3 <- rstan::extract(fit3)
-launch_shinystan(fit3)
-
-
+# Combine the samples together
 chains <- cbind(samples3[[1]],samples3[[2]],samples3[[3]], samples3[[4]])
 sims <- as.mcmc(chains)
+
+# Calculate Raftery Lewis diagnostic
 r_l <- raftery.diag(sims)
 
+# Create data frame with the chains
 chains_frame <- data.frame(chains, iter = 1:nrow(chains))
-ggplot(chains_frame, aes(x = iter, y = X1)) +
-    geom_line() + 
-    theme_minimal() +
-    labs(x = "Iteration", y = "Beta 1")
 
+# Plot some of the trace plots 
 p1 <- ggplot(chains_frame, aes(x = iter, y = X5)) +
     geom_line() + 
     theme_minimal() +
@@ -162,15 +200,19 @@ p4 <- ggplot(chains_frame, aes(x = iter, y = X52)) +
     theme_minimal() +
     labs(x = "Iteration", y = TeX(r'($\alpha$)'))
 
-posterior_means <- apply(chains[, 1:50], 2, mean)
+p1 + p2 + p3 + p4
+
 # Frequentist
 cv.out <- cv.glmnet(as.matrix(X),y,alpha=0, standardize = TRUE)
+# Plot the cross validation for the best lambda value
 plot(cv.out)
+# Extract the best lambda value
 bestlam <- cv.out$lambda.min
-bestlam
-mod <- glmnet(X, y , alpha = 0, lambda = bestlam, standardize = TRUE)
-predict(mod,type="coefficients",s=bestlam)
 
+# Fit model with the best lambda
+mod <- glmnet(X, y , alpha = 0, lambda = bestlam, standardize = TRUE)
+
+# Bootstrap the data and get coefficients with each bootstrap dataset
 bootstrap_coef <- matrix(0, nrow = 500, ncol = 50)
 for(i in 1:500){
     n <- nrow(small)
@@ -182,6 +224,8 @@ for(i in 1:500){
     coef <- as.vector(predict(model,type="coefficients",s=bestlam))
     bootstrap_coef[i, ] <- coef
 }
+
+# Calculate confidence intervals and estimates
 cis <- apply(bootstrap_coef, 2, quantile, c(.025, .975))
 boot_est <- apply(bootstrap_coef, 2, mean)
 vars <- rownames(predict(model,type="coefficients",s=bestlam))
@@ -189,4 +233,7 @@ ridge_freq <- data.frame(Variable = vars, Lower = cis[1, ],
                          Estimate = boot_est, Upper = cis[2,]) %>% 
     arrange(desc(Estimate))
 
+# Examine the coefficents that don't have 0 in the interval
 ridge_freq %>% filter((Lower > 0) | Upper < 0) %>% arrange(desc(Estimate))
+```
+
