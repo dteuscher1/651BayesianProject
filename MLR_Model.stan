@@ -24,10 +24,10 @@ model {                     // Model block
   mu = alpha + X * beta;            // Creation of linear predictor
   
   // priors
-  alpha ~ normal(0, 10);
+  alpha ~ normal(4, 1.5);
   sigma_beta ~ gamma(a, b);
   beta ~ normal(0, sigma_beta);
-  sigma ~ inv_gamma(1, 20);     // With sigma bounded at 0, this is half-cauchy
+  sigma ~ inv_gamma(2, 20);     // With sigma bounded at 0, this is half-cauchy
   
   // likelihood
   y ~ normal(mu, sigma);

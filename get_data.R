@@ -27,7 +27,7 @@ N <- nrow(small)
 X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% scale() %>% bind_cols(intercept = 1)
 K <- ncol(X)
 y <- small$FIP
-data <- list(N = N, K = K, X = X, y = y, a = 45, b = 15)   # Set alpha and beta without needing to recompile!
+data <- list(N = N, K = K, X = X, y = y, a = 150, b = 30)   # Set alpha and beta without needing to recompile!
 
 library(rstan)
 ### Run the model and examine results
@@ -61,7 +61,7 @@ library(shinystan)
 launch_shinystan(fit2)
 
 
-data <- list(N = N, K = K, X = X, y = y, a = 75, b = 20)   # Set alpha and beta without needing to recompile!
+data <- list(N = N, K = K, X = X, y = y, a = 40, b = 8)   # Set alpha and beta without needing to recompile!
 
 library(rstan)
 ### Run the model and examine results
@@ -78,8 +78,14 @@ library(shinystan)
 launch_shinystan(fit3)
 
 
+chains <- cbind(samples3[[1]],samples3[[2]],samples3[[3]], samples3[[4]])
+sims <- as.mcmc(chains)
+r_l <- raftery.diag(sims)
+
+
+# Frequentist
 library(glmnet)
-cv.out <- cv.glmnet(X,y,alpha=0, standardize = TRUE)
+cv.out <- cv.glmnet(as.matrix(X),y,alpha=0, standardize = TRUE)
 plot(cv.out)
 bestlam <- cv.out$lambda.min
 bestlam
@@ -104,3 +110,5 @@ vars <- rownames(predict(model,type="coefficients",s=bestlam))
 ridge_freq <- data.frame(Variable = vars, Lower = cis[1, ], 
                          Estimate = boot_est, Upper = cis[2,]) %>% 
     arrange(desc(Estimate))
+
+ridge_freq %>% filter((Lower > 0) | Upper < 0) %>% arrange(desc(Estimate))
