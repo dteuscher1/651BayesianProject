@@ -14,9 +14,16 @@ transformed data {          // Transformed data block. Not used presently.
 
 parameters {                // Parameters block
   vector[K] beta;           // Coefficient vector
+  real<lower=0> sigma2;
+  real<lower=0> sigma2_beta;
+  real<lower=0> alpha;// Error scale
+}
+
+transformed parameters {
   real<lower=0> sigma;
   real<lower=0> sigma_beta;
-  real<lower=0> alpha;// Error scale
+  sigma = sqrt(sigma2);
+  sigma_beta = sqrt(sigma2_beta);
 }
 
 model {                     // Model block
@@ -25,9 +32,9 @@ model {                     // Model block
   
   // priors
   alpha ~ normal(4, 1.5);
-  sigma_beta ~ gamma(a, b);
+  sigma2_beta ~ gamma(a, b);
   beta ~ normal(0, sigma_beta);
-  sigma ~ inv_gamma(2, 20);     // With sigma bounded at 0, this is half-cauchy
+  sigma2 ~ inv_gamma(2, 10);     // With sigma bounded at 0, this is half-cauchy
   
   // likelihood
   y ~ normal(mu, sigma);
