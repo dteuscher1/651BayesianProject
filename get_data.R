@@ -24,7 +24,7 @@ X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% sca
 y <- small$FIP
 
 N <- nrow(small)
-X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% scale() %>% bind_cols(intercept = 1)
+X <- model.matrix(FIP ~.-1-Name-year-last_name-first_name, data = small) %>% scale()
 K <- ncol(X)
 y <- small$FIP
 data <- list(N = N, K = K, X = X, y = y, a = 36, b = 12)   # Set alpha and beta without needing to recompile!
@@ -38,8 +38,8 @@ alpha.draws <- numeric(length = ndraws)
 sigma2 <- numeric(length = ndraws)
 sigma2_beta <- numeric(length = ndraws)
 alpha.draws[1] <- 4
-sigma2[1] <- 1
-sigma2_beta[1] <- 1
+sigma2[1] <- .7
+sigma2_beta[1] <- 1.5
 a <- 40
 b <- 8
 X_mat <- as.matrix(X)
@@ -47,24 +47,24 @@ accept <- 0
 library(mvtnorm)
 for(i in 2:ndraws){
     r <- y - alpha.draws[i-1]
-    sigma_mat <- solve((t(X_mat) %*% X_mat)/sigma2[i-1] + 1/sigma2_beta[i-1] *diag(50))
+    sigma_mat <- solve((t(X_mat) %*% X_mat)/sigma2[i-1] + 1/sigma2_beta[i-1] *diag(49))
     mu_vec <- sigma_mat %*% ((t(X) %*% r)/sigma2[i-1])
     
     beta.draws[i, ] <- rmvnorm(1, mean = mu_vec, sigma = sigma_mat)
-    a_star <- a + nrow(X_mat)/2
-    b_star <- b + .5*sum((y - (X_mat %*% beta.draws[i, ]))^2)
+    a_star <- 2 + (nrow(X_mat)/2)
+    b_star <- 10 + .5*sum((r - (X_mat %*% beta.draws[i, ]))^2)
     sigma2[i] <- 1/rgamma(1, a_star, b_star)
     r <- y - (X_mat %*% beta.draws[i, ])
     alpha_mat <- matrix(1, ncol = 1, nrow = nrow(X))
-    sigma_mat <- solve((t(alpha_mat) %*% alpha_mat)/sigma2[i-1] + 1/sigma2_beta[i-1] *diag(1))
-    mu_vec <- sigma_mat %*% ((t(alpha_mat) %*% r)/sigma2[i-1])
+    sigma_mat <- solve((t(alpha_mat) %*% alpha_mat)/sigma2[i] + 1/sigma2_beta[i-1] *diag(1))
+    mu_vec <- sigma_mat %*% ((t(alpha_mat) %*% r)/sigma2[i])
     alpha.draws[i] <- rmvnorm(1, mean = mu_vec, sigma = sigma_mat)
-    proposed_value <- rnorm(1, mean = sigma2_beta[i-1], sd = .1)
+    proposed_value <- log(exp(rnorm(1, mean = sigma2_beta[i-1], sd = .4)))
     if(proposed_value > 0){
         mh <- sum(dnorm(beta.draws[i, ], 0, proposed_value, log = T)) + 
-            sum(dgamma(proposed_value, 40, 8, log = T)) - 
+            sum(dgamma(proposed_value, a, b, log = T)) - 
             sum(dnorm(beta.draws[i, ], 0, sigma2_beta[i-1], log = T)) -
-            sum(dgamma(sigma2_beta, 40, 8, log = T))
+            sum(dgamma(sigma2_beta[i-1], a, b, log = T))
         if(log(runif(1)) < mh){
             sigma2_beta[i] <- proposed_value
             accept <- accept + 1
@@ -78,6 +78,10 @@ for(i in 2:ndraws){
 
 plot(sigma2_beta, type = "l")
 plot(alpha.draws, type = "l")
+plot(beta.draws[,1], type = "l")
+plot(sigma2, type = "l")
+
+
 library(rstan)
 ### Run the model and examine results
 nCores <- parallel::detectCores()
