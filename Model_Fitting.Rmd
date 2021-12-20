@@ -7,7 +7,6 @@ output: pdf_document
 library(baseballr)
 # Alternatively, using the devtools package:
 #devtools::install_github(repo = "BillPetti/baseballr")
-
 library(tidyverse)
 library(mvtnorm)
 library(rstan)
@@ -59,18 +58,28 @@ y <- small$FIP
 
 
 # Hand draws 
+# Number of iterations
 ndraws <- 10000
+
+# Create matricies or vectors to store draws
 beta.draws <- matrix(0, nrow = ndraws, ncol = ncol(X))
 alpha.draws <- numeric(length = ndraws)
 sigma2 <- numeric(length = ndraws)
 sigma2_beta <- numeric(length = ndraws)
+
+# Set initial values
 alpha.draws[1] <- 4
 sigma2[1] <- .7
 sigma2_beta[1] <- 2
 a <- 40
 b <- 8
 X_mat <- as.matrix(X)
+# Set counter for number of accepted draws
 accept <- 0
+
+# Metropolis Hastings and Gibbs Sampler 
+# Sample beta, sigma, and alpha from the full conditional using Gibbs sampling
+# Sample sigma_beta using Metropolis Hastings
 for(i in 2:ndraws){
     # Subtract alpha so r ~ N(Xbeta, sigma^2)
     r <- y - alpha.draws[i-1]
@@ -97,6 +106,7 @@ for(i in 2:ndraws){
     
     # Propose value for sigma^2 beta
     proposed_value <- rnorm(1, mean = sigma2_beta[i-1], sd = .4)
+    
     # Metropolis Hastings for sigma^2 beta using Gaussian random walk
     if(proposed_value > 0){
         mh <- sum(dnorm(beta.draws[i, ], 0, proposed_value, log = T)) + 
